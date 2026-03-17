@@ -1,6 +1,6 @@
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 import os
 from dotenv import load_dotenv
@@ -20,9 +20,9 @@ MONGO_URI = os.getenv("MONGO_URI")
 # DATA PARSER
 # =========================
 
+# Robogaragen datassa ei timestamp, tehty fallback
 def parse_timestamp(data: dict):
     candidates = [
-        ("DateTime", "%d %b %Y %H:%M:%S"),
         ("DateTime", "%d %b %Y %H:%M:%S"),
         ("Time", "%d %b %Y %H:%M:%S"),
     ]
@@ -32,11 +32,13 @@ def parse_timestamp(data: dict):
         if not value:
             continue
         try:
-            return datetime.strptime(value, fmt)
+            # parsitaan ja tehdään siitä UTC-aware datetime
+            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             pass
 
-    return None
+    # fallback: nykyhetki
+    return datetime.now(timezone.utc)
 
 
 def parse_person_count(data: dict):
@@ -110,29 +112,46 @@ class MQTTIngestor:
 
 
 # =========================
-# CALLBACK
+# MONGO CALLBACK
 # =========================
-mongo = MongoClient(MONGO_URI)
+mongo = MongoClient(os.getenv("MONGO_URI"))
 db = mongo["data_ml"]
 collection = db["readings"]
 
+collection.create_index("message_hash", unique=True)
+collection.create_index([("device_id", 1), ("timestamp", 1)])
+
+def make_message_hash(data: dict) -> str:
+    raw = data.get("raw", {})
+    raw_str = json.dumps(raw, sort_keys=True, default=str)
+    return hashlib.md5(raw_str.encode("utf-8")).hexdigest()
 
 def handle_data(data):
+    message_hash = make_message_hash(data)
+
     doc = {
-        "device_id": data["device_id"],
-        "timestamp": data["timestamp"],
-        "person_count": data["person_count"],
+        "device_id": data.get("device_id"),
+        "timestamp": data.get("timestamp"),
+        "person_count": data.get("person_count", 0),
         "temperature": data.get("temperature"),
         "humidity": data.get("humidity"),
         "dew_point": data.get("dew_point"),
         "co2": data.get("co2"),
         "source_collection": data.get("collection"),
-        "raw": data.get("raw"),
+        "db_name": data.get("db_name"),
+        "message_hash": message_hash,
+        "raw": data.get("raw", {}),
     }
 
-    result = collection.insert_one(doc)
-    print(f"✅ Saved to MongoDB: {result.inserted_id}")
+    try:
+        result = collection.insert_one(doc)
+        print(f"✅ Saved to MongoDB: {result.inserted_id}")
 
+    except DuplicateKeyError:
+        print(f"⚠️ Duplicate ignored: {message_hash}")
+
+    except Exception as e:
+        print(f"❌ MongoDB insert failed: {e}")
 
 # =========================
 # MAIN
