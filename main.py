@@ -118,7 +118,11 @@ mongo = MongoClient(os.getenv("MONGO_URI"))
 db = mongo["data_ml"]
 collection = db["readings"]
 
-collection.create_index("message_hash", unique=True)
+collection.create_index(
+    "message_hash",
+    unique=True,
+    partialFilterExpression={"message_hash": {"$exists": True}}
+)
 collection.create_index([("device_id", 1), ("timestamp", 1)])
 
 def make_message_hash(data: dict) -> str:
