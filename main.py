@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 import hashlib
+import time
 
 load_dotenv()
 
@@ -84,6 +85,8 @@ class MQTTIngestor:
 
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
+        self.client.on_disconnect = self.on_disconnect
+        self.client.reconnect_delay_set(min_delay=1, max_delay=30)
 
         self.on_data_callback = on_data_callback
 
@@ -92,6 +95,19 @@ class MQTTIngestor:
     def on_connect(self, client, userdata, flags, rc):
         print("✅ Connected to MQTT broker with code:", rc)
         client.subscribe(TOPIC)
+
+    def on_disconnect(self, client, userdata, rc):
+        print(f"⚠️ Disconnected from MQTT (rc={rc})")
+
+        while True:
+            try:
+                print("🔄 Trying to reconnect...")
+                client.reconnect()
+                print("✅ Reconnected!")
+                break
+            except Exception as e:
+                print(f"❌ Reconnect failed: {e}")
+                time.sleep(5)
 
     def on_message(self, client, userdata, msg):
         payload = msg.payload.decode()
@@ -116,7 +132,7 @@ class MQTTIngestor:
 # =========================
 # MONGO CALLBACK
 # =========================
-mongo = MongoClient(os.getenv("MONGO_URI"))
+mongo = MongoClient(MONGO_URI)
 db = mongo["data_ml"]
 collection = db["readings"]
 
