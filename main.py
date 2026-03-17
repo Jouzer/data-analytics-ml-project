@@ -128,9 +128,11 @@ collection.create_index(
 collection.create_index([("device_id", 1), ("timestamp", 1)])
 
 def make_message_hash(data: dict) -> str:
-    raw = data.get("raw", {})
-    raw_str = json.dumps(raw, sort_keys=True, default=str)
-    return hashlib.md5(raw_str.encode("utf-8")).hexdigest()
+    hashable = {
+        k: v for k, v in data.items()
+    }
+    hash_str = json.dumps(hashable, sort_keys=True, default=str)
+    return hashlib.md5(hash_str.encode("utf-8")).hexdigest()
 
 def handle_data(data):
     message_hash = make_message_hash(data)
