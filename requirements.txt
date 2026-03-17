@@ -2,3 +2,4 @@ paho-mqtt
 pymongo[srv]
 python-dotenv
 dnspython
+hashlib
